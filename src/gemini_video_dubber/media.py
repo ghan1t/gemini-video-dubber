@@ -18,6 +18,8 @@ PCM_SAMPLE_WIDTH_BYTES = 2
 PCM_CHANNELS = 1
 PCM_CHUNK_SECONDS = 0.1
 PCM_CHUNK_BYTES = int(PCM_INPUT_RATE * PCM_SAMPLE_WIDTH_BYTES * PCM_CHUNK_SECONDS)
+SILENCE_DETECT_NOISE = "-35dB"
+SILENCE_DETECT_DURATION = "0.05"
 
 
 class MediaError(RuntimeError):
@@ -147,6 +149,77 @@ def probe_input(input_path: Path, tools: MediaTools) -> ProbeInfo:
     return parse_ffprobe_json(result.stdout)
 
 
+def _parse_leading_silence(stderr: str) -> Optional[float]:
+    silence_started_at_zero = False
+    for line in stderr.splitlines():
+        if "silence_start:" in line:
+            try:
+                silence_start = float(line.rsplit("silence_start:", 1)[1].strip())
+            except ValueError:
+                continue
+            if silence_start <= 0.02:
+                silence_started_at_zero = True
+            elif not silence_started_at_zero:
+                return 0.0
+        if silence_started_at_zero and "silence_end:" in line:
+            value = line.rsplit("silence_end:", 1)[1].split("|", 1)[0].strip()
+            try:
+                return float(value)
+            except ValueError:
+                return None
+    return None if silence_started_at_zero else 0.0
+
+
+def detect_audio_leading_silence(input_path: Path, tools: MediaTools) -> Optional[float]:
+    command = [
+        str(tools.ffmpeg),
+        "-v",
+        "info",
+        "-i",
+        str(input_path),
+        "-map",
+        "0:a:0",
+        "-af",
+        f"silencedetect=noise={SILENCE_DETECT_NOISE}:d={SILENCE_DETECT_DURATION}",
+        "-f",
+        "null",
+        "-",
+    ]
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    return _parse_leading_silence(result.stderr)
+
+
+def detect_pcm_leading_silence(
+    pcm_path: Path,
+    tools: MediaTools,
+    sample_rate: int = PCM_OUTPUT_RATE,
+) -> Optional[float]:
+    command = [
+        str(tools.ffmpeg),
+        "-v",
+        "info",
+        "-f",
+        "s16le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        str(PCM_CHANNELS),
+        "-i",
+        str(pcm_path),
+        "-af",
+        f"silencedetect=noise={SILENCE_DETECT_NOISE}:d={SILENCE_DETECT_DURATION}",
+        "-f",
+        "null",
+        "-",
+    ]
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    return _parse_leading_silence(result.stderr)
+
+
 def extract_audio_command(input_path: Path, tools: MediaTools) -> list[str]:
     return [
         str(tools.ffmpeg),
@@ -197,16 +270,23 @@ async def iter_pcm_chunks(
             raise MediaError(stderr.decode("utf-8", errors="replace").strip() or "ffmpeg failed")
 
 
-def write_translated_wav(pcm_path: Path, wav_path: Path, leading_silence_seconds: float) -> float:
+def write_translated_wav(pcm_path: Path, wav_path: Path, start_offset_seconds: float) -> float:
     pcm_bytes = pcm_path.read_bytes()
-    silence_frames = max(0, int(leading_silence_seconds * PCM_OUTPUT_RATE))
+    silence_frames = max(0, int(start_offset_seconds * PCM_OUTPUT_RATE))
+    trim_frames = max(0, int(-start_offset_seconds * PCM_OUTPUT_RATE))
+    trim_bytes = trim_frames * PCM_SAMPLE_WIDTH_BYTES * PCM_CHANNELS
+    if trim_bytes:
+        trim_bytes -= trim_bytes % (PCM_SAMPLE_WIDTH_BYTES * PCM_CHANNELS)
+    trimmed_pcm_bytes = pcm_bytes[trim_bytes:]
     silence_bytes = b"\x00" * silence_frames * PCM_SAMPLE_WIDTH_BYTES * PCM_CHANNELS
     with wave.open(str(wav_path), "wb") as wav:
         wav.setnchannels(PCM_CHANNELS)
         wav.setsampwidth(PCM_SAMPLE_WIDTH_BYTES)
         wav.setframerate(PCM_OUTPUT_RATE)
-        wav.writeframes(silence_bytes + pcm_bytes)
-    total_frames = silence_frames + len(pcm_bytes) // (PCM_SAMPLE_WIDTH_BYTES * PCM_CHANNELS)
+        wav.writeframes(silence_bytes + trimmed_pcm_bytes)
+    total_frames = silence_frames + len(trimmed_pcm_bytes) // (
+        PCM_SAMPLE_WIDTH_BYTES * PCM_CHANNELS
+    )
     return total_frames / PCM_OUTPUT_RATE
 
 
@@ -227,6 +307,9 @@ def build_remux_command(
     tools: MediaTools,
     subtitle_path: Optional[Path] = None,
     reencode_video: bool = False,
+    source_track_title: str = "Original",
+    target_track_title: str = "Gemini Dub",
+    subtitle_track_title: str = "Gemini Translation",
 ) -> list[str]:
     command = [
         str(tools.ffmpeg),
@@ -251,25 +334,37 @@ def build_remux_command(
     command += ["-c:v"]
     command += ["libx264", "-preset", "veryfast", "-crf", "20"] if reencode_video else ["copy"]
     command += [
+        "-disposition:a:0",
+        "0",
+        "-disposition:a:1",
+        "default",
         "-c:a",
         "aac",
         "-metadata:s:a:0",
         f"language={source_code}",
         "-metadata:s:a:0",
-        "title=Original",
+        f"title={source_track_title}",
+        "-metadata:s:a:0",
+        f"handler_name={source_track_title}",
         "-metadata:s:a:1",
         f"language={target_code}",
         "-metadata:s:a:1",
-        "title=Gemini Dub",
+        f"title={target_track_title}",
+        "-metadata:s:a:1",
+        f"handler_name={target_track_title}",
     ]
     if subtitle_path is not None:
         command += [
+            "-disposition:s:0",
+            "default",
             "-c:s",
             "mov_text",
             "-metadata:s:s:0",
             f"language={target_code}",
             "-metadata:s:s:0",
-            "title=Gemini Translation",
+            f"title={subtitle_track_title}",
+            "-metadata:s:s:0",
+            f"handler_name={subtitle_track_title}",
         ]
     command += ["-shortest", str(output_path)]
     return command
@@ -283,6 +378,9 @@ def remux_video(
     target_code: str,
     tools: MediaTools,
     subtitle_path: Optional[Path] = None,
+    source_track_title: str = "Original",
+    target_track_title: str = "Gemini Dub",
+    subtitle_track_title: str = "Gemini Translation",
 ) -> bool:
     for reencode in (False, True):
         command = build_remux_command(
@@ -294,6 +392,9 @@ def remux_video(
             tools,
             subtitle_path,
             reencode_video=reencode,
+            source_track_title=source_track_title,
+            target_track_title=target_track_title,
+            subtitle_track_title=subtitle_track_title,
         )
         result = subprocess.run(command, check=False, capture_output=True, text=True)
         if result.returncode == 0:

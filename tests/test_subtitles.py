@@ -29,6 +29,31 @@ def test_first_caption_clamps_to_zero_and_final_end_is_valid() -> None:
     assert "00:00:00,000 --> 00:00:01,200" in content
 
 
+def test_start_offset_shifts_captions_earlier() -> None:
+    content = transcript_events_to_srt(
+        [TranscriptEvent("Oho.", 4.2, "lv")],
+        first_input_sent_seconds=0.0,
+        translated_audio_duration=6.0,
+        start_offset_seconds=-4.0,
+    )
+
+    assert "00:00:00,200 --> 00:00:03,200" in content
+
+
+def test_sparse_transcripts_do_not_create_long_caption() -> None:
+    content = transcript_events_to_srt(
+        [
+            TranscriptEvent("First", 0.1, "lv"),
+            TranscriptEvent("Second", 24.0, "lv"),
+        ],
+        first_input_sent_seconds=0.0,
+        translated_audio_duration=30.0,
+    )
+
+    assert "00:00:00,100 --> 00:00:03,100" in content
+    assert "00:00:24,000 --> 00:00:27,000" in content
+
+
 def test_empty_transcripts_are_noop(tmp_path: Path) -> None:
     output = tmp_path / "empty.srt"
 

@@ -39,11 +39,24 @@ python -m gemini_video_dubber
 When running from source, the app checks `vendor/macos/ffmpeg` and `vendor/macos/ffprobe`
 before falling back to `PATH`.
 
+Use the GUI's dub start offset field to tune translated audio and subtitle timing.
+Positive values delay the dub; negative values start it earlier by trimming translated audio.
+The job report includes the observed Gemini wall-clock latency and measured leading
+silence for the original audio, raw translated PCM, and final translated WAV. Use
+the measured silence values, not the wall-clock latency, when choosing an offset.
+
 ## Test
 
 ```bash
 pytest
 ruff check .
+```
+
+The Gemini integration test uses `tests/resources/TedTalk.mp4`, reads
+`GEMINI_API_KEY` from `.env`, and writes persistent outputs to `tests/output/`:
+
+```bash
+pytest tests/test_integration_gemini.py -s
 ```
 
 ## Package

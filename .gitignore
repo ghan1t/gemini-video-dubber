@@ -9,6 +9,7 @@ build/
 dist/
 *.spec.tmp
 job_tmp/
+tests/output/
 *.egg-info/
 .idea/
 vendor/

@@ -29,6 +29,7 @@ class GeminiVideoDubberApp:
         self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop"))
         self.source_language = tk.StringVar(value=display_for_code("en"))
         self.target_language = tk.StringVar(value=display_for_code("es"))
+        self.audio_start_offset = tk.StringVar(value="0.0")
         self.create_subtitles = tk.BooleanVar(value=True)
         self.keep_original_audio = tk.BooleanVar(value=True)
         self.api_key = tk.StringVar()
@@ -48,7 +49,7 @@ class GeminiVideoDubberApp:
         frame = ttk.Frame(self.root, padding=16)
         frame.grid(row=0, column=0, sticky="nsew")
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(8, weight=1)
+        frame.rowconfigure(9, weight=1)
 
         self._file_row(frame, 0, "Video file", self.video_path, self._choose_video)
         self._file_row(frame, 1, "Output folder", self.output_dir, self._choose_output_dir)
@@ -74,12 +75,22 @@ class GeminiVideoDubberApp:
         target.grid(row=3, column=1, sticky="ew", pady=6)
         self.controls.append(target)
 
+        ttk.Label(frame, text="Dub start offset (seconds)").grid(
+            row=4,
+            column=0,
+            sticky="w",
+            pady=6,
+        )
+        offset_entry = ttk.Entry(frame, textvariable=self.audio_start_offset, width=12)
+        offset_entry.grid(row=4, column=1, sticky="w", pady=6)
+        self.controls.append(offset_entry)
+
         subtitles = ttk.Checkbutton(
             frame,
             text="Create approximate subtitles",
             variable=self.create_subtitles,
         )
-        subtitles.grid(row=4, column=1, sticky="w", pady=6)
+        subtitles.grid(row=5, column=1, sticky="w", pady=6)
         self.controls.append(subtitles)
 
         original_audio = ttk.Checkbutton(
@@ -88,15 +99,15 @@ class GeminiVideoDubberApp:
             variable=self.keep_original_audio,
             state="disabled",
         )
-        original_audio.grid(row=5, column=1, sticky="w", pady=6)
+        original_audio.grid(row=6, column=1, sticky="w", pady=6)
 
-        ttk.Label(frame, text="API key").grid(row=6, column=0, sticky="w", pady=6)
+        ttk.Label(frame, text="API key").grid(row=7, column=0, sticky="w", pady=6)
         api_entry = ttk.Entry(frame, textvariable=self.api_key, show="*", width=44)
-        api_entry.grid(row=6, column=1, sticky="ew", pady=6)
+        api_entry.grid(row=7, column=1, sticky="ew", pady=6)
         self.controls.append(api_entry)
 
         actions = ttk.Frame(frame)
-        actions.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(12, 8))
+        actions.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12, 8))
         actions.columnconfigure(1, weight=1)
         start = ttk.Button(
             actions,
@@ -107,12 +118,12 @@ class GeminiVideoDubberApp:
         ttk.Label(actions, textvariable=self.status).grid(row=0, column=1, sticky="w", padx=12)
 
         bar = ttk.Progressbar(frame, variable=self.progress, mode="determinate", maximum=100)
-        bar.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(0, 8))
+        bar.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(0, 8))
 
         self.log = tk.Text(frame, height=16, wrap="word", state="disabled")
-        self.log.grid(row=9, column=0, columnspan=3, sticky="nsew")
+        self.log.grid(row=10, column=0, columnspan=3, sticky="nsew")
         scrollbar = ttk.Scrollbar(frame, command=self.log.yview)
-        scrollbar.grid(row=9, column=3, sticky="ns")
+        scrollbar.grid(row=10, column=3, sticky="ns")
         self.log.configure(yscrollcommand=scrollbar.set)
 
     def _file_row(
@@ -156,6 +167,14 @@ class GeminiVideoDubberApp:
 
     def _start_job(self) -> None:
         api_key = load_api_key(self.api_key.get())
+        try:
+            audio_start_offset = float(self.audio_start_offset.get().strip() or "0")
+        except ValueError:
+            messagebox.showerror(
+                "Gemini Video Dubber",
+                "Dub start offset must be a number of seconds, such as 0, -4.2, or 1.5.",
+            )
+            return
         job = DubJob(
             input_path=Path(self.video_path.get()).expanduser(),
             output_dir=Path(self.output_dir.get()).expanduser(),
@@ -163,6 +182,7 @@ class GeminiVideoDubberApp:
             target_language_code=code_for_display(self.target_language.get()),
             create_subtitles=self.create_subtitles.get(),
             api_key=api_key,
+            audio_start_offset_seconds=audio_start_offset,
         )
         self.progress.set(0.0)
         self.status.set("Starting.")

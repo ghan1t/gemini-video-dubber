@@ -98,6 +98,21 @@ SUPPORTED_LANGUAGES: tuple[Language, ...] = (
 LANGUAGE_BY_DISPLAY = {language.display: language for language in SUPPORTED_LANGUAGES}
 LANGUAGE_BY_CODE = {language.code: language for language in SUPPORTED_LANGUAGES}
 
+MP4_LANGUAGE_BY_CODE = {
+    "de": "deu",
+    "en": "eng",
+    "es": "spa",
+    "fr": "fra",
+    "it": "ita",
+    "ja": "jpn",
+    "ko": "kor",
+    "lv": "lav",
+    "pt-BR": "por",
+    "pt-PT": "por",
+    "zh-Hans": "zho",
+    "zh-Hant": "zho",
+}
+
 
 def code_for_display(display: str) -> str:
     return LANGUAGE_BY_DISPLAY[display].code
@@ -105,3 +120,12 @@ def code_for_display(display: str) -> str:
 
 def display_for_code(code: str) -> str:
     return LANGUAGE_BY_CODE[code].display
+
+
+def label_for_code(code: str) -> str:
+    language = LANGUAGE_BY_CODE.get(code)
+    return language.label if language else code
+
+
+def mp4_language_for_code(code: str) -> str:
+    return MP4_LANGUAGE_BY_CODE.get(code, code)

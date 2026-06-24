@@ -19,6 +19,10 @@ class _Caption:
     text: str
 
 
+MAX_CAPTION_SECONDS = 3.0
+MIN_CAPTION_SECONDS = 0.3
+
+
 def _srt_timestamp(seconds: float) -> str:
     seconds = max(0.0, seconds)
     milliseconds = int(round(seconds * 1000))
@@ -32,22 +36,35 @@ def transcript_events_to_srt(
     events: list[TranscriptEvent],
     first_input_sent_seconds: float,
     translated_audio_duration: float,
+    start_offset_seconds: float = 0.0,
 ) -> str:
     usable = [event for event in events if event.text.strip()]
     if not usable:
         return ""
 
-    starts = [max(0.0, event.received_at_seconds - first_input_sent_seconds) for event in usable]
+    timeline_events = sorted(
+        (
+            (
+                max(
+                    0.0,
+                    event.received_at_seconds - first_input_sent_seconds + start_offset_seconds,
+                ),
+                event,
+            )
+        for event in usable
+        ),
+        key=lambda item: item[0],
+    )
     captions: list[_Caption] = []
-    for index, event in enumerate(usable):
-        start = starts[index]
-        if index + 1 < len(usable):
-            end = max(start + 0.6, starts[index + 1])
+    for index, (start, event) in enumerate(timeline_events):
+        if index + 1 < len(timeline_events):
+            next_start = timeline_events[index + 1][0]
+            end = min(next_start, start + MAX_CAPTION_SECONDS)
         else:
-            end = start + 3.0
+            end = start + MAX_CAPTION_SECONDS
         if translated_audio_duration > 0:
             end = min(end, translated_audio_duration)
-        end = max(end, start + 0.3)
+        end = max(end, min(start + MIN_CAPTION_SECONDS, translated_audio_duration or end))
         captions.append(_Caption(start, end, event.text.strip()))
 
     merged: list[_Caption] = []
@@ -78,8 +95,14 @@ def write_srt(
     output_path: Path,
     first_input_sent_seconds: float,
     translated_audio_duration: float,
+    start_offset_seconds: float = 0.0,
 ) -> bool:
-    content = transcript_events_to_srt(events, first_input_sent_seconds, translated_audio_duration)
+    content = transcript_events_to_srt(
+        events,
+        first_input_sent_seconds,
+        translated_audio_duration,
+        start_offset_seconds=start_offset_seconds,
+    )
     if not content:
         return False
     output_path.write_text(content, encoding="utf-8")

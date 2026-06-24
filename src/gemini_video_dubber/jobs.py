@@ -10,6 +10,7 @@ from typing import Callable, Optional
 
 from . import media
 from .gemini_live_translate import GeminiTranslationError, translate_audio_stream
+from .languages import label_for_code, mp4_language_for_code
 from .subtitles import write_srt
 
 
@@ -21,6 +22,7 @@ class DubJob:
     target_language_code: str
     create_subtitles: bool
     api_key: str
+    audio_start_offset_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,7 @@ class JobRunner:
             self._emit("probing", 5.0, "Probing input media.")
             probe = media.probe_input(job.input_path, tools)
             output_path = media.output_path_for(job.input_path, job.output_dir)
+            artifact_stem = output_path.with_suffix("")
 
             tmp_dir = Path(tempfile.mkdtemp(prefix="gemini_video_dubber_"))
             translated_pcm = tmp_dir / "translated_24k_mono.pcm"
@@ -108,32 +111,53 @@ class JobRunner:
                 if cancel_event.is_set():
                     raise asyncio.CancelledError
 
-                leading_silence = max(
+                observed_latency = max(
                     0.0,
                     result.first_output_received_seconds - result.first_input_sent_seconds,
                 )
+                start_offset = job.audio_start_offset_seconds
                 self._emit(
                     "writing_audio",
                     78.0,
-                    f"Writing translated WAV with {leading_silence:.2f}s leading silence.",
+                    f"Writing translated WAV with {start_offset:.2f}s start offset.",
                 )
                 translated_duration = media.write_translated_wav(
                     result.pcm_path,
                     translated_wav,
-                    leading_silence,
+                    start_offset,
+                )
+                original_leading_silence = media.detect_audio_leading_silence(
+                    job.input_path,
+                    tools,
+                )
+                translated_pcm_leading_silence = media.detect_pcm_leading_silence(
+                    result.pcm_path,
+                    tools,
+                )
+                subtitle_timeline_origin = result.first_output_received_seconds - (
+                    translated_pcm_leading_silence or 0.0
+                )
+                translated_wav_leading_silence = media.detect_audio_leading_silence(
+                    translated_wav,
+                    tools,
                 )
 
                 mux_subtitle_path = None
+                subtitle_artifact_available = False
                 if job.create_subtitles:
                     self._emit("writing_subtitles", 84.0, "Writing approximate subtitle track.")
                     if write_srt(
                         result.output_transcripts,
                         subtitle_path,
-                        result.first_input_sent_seconds,
+                        subtitle_timeline_origin,
                         translated_duration,
+                        start_offset_seconds=job.audio_start_offset_seconds,
                     ):
                         mux_subtitle_path = subtitle_path
+                        subtitle_artifact_available = True
                     else:
+                        subtitle_path.write_text("", encoding="utf-8")
+                        subtitle_artifact_available = True
                         self._emit(
                             "writing_subtitles",
                             None,
@@ -146,23 +170,56 @@ class JobRunner:
                     "source_language_code": job.source_language_code,
                     "target_language_code": job.target_language_code,
                     "create_subtitles": job.create_subtitles,
+                    "audio_start_offset_seconds": job.audio_start_offset_seconds,
                     "duration": probe.duration,
-                    "leading_silence_seconds": leading_silence,
+                    "leading_silence_seconds": max(0.0, start_offset),
+                    "trimmed_translated_audio_seconds": max(0.0, -start_offset),
+                    "observed_gemini_latency_seconds": observed_latency,
+                    "original_audio_leading_silence_seconds": original_leading_silence,
+                    "translated_pcm_leading_silence_seconds": translated_pcm_leading_silence,
+                    "translated_wav_leading_silence_seconds": translated_wav_leading_silence,
+                    "subtitle_timeline_origin_seconds": subtitle_timeline_origin,
                     "source_language_warning": result.detected_source_mismatch,
                     "input_transcript_count": len(result.input_transcripts),
                     "output_transcript_count": len(result.output_transcripts),
                 }
                 report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
+                artifact_pcm_path = artifact_stem.with_name(
+                    f"{artifact_stem.name}_translated_24k_mono.pcm"
+                )
+                artifact_wav_path = artifact_stem.with_name(
+                    f"{artifact_stem.name}_translated_24k_mono.wav"
+                )
+                artifact_srt_path = artifact_stem.with_name(
+                    f"{artifact_stem.name}_translated_subtitles.srt"
+                )
+                shutil.copy2(translated_pcm, artifact_pcm_path)
+                shutil.copy2(translated_wav, artifact_wav_path)
+                if subtitle_artifact_available:
+                    shutil.copy2(subtitle_path, artifact_srt_path)
+
+                report["translated_pcm_path"] = str(artifact_pcm_path)
+                report["translated_wav_path"] = str(artifact_wav_path)
+                report["translated_subtitles_path"] = (
+                    str(artifact_srt_path) if subtitle_artifact_available else None
+                )
+                report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
                 self._emit("muxing", 90.0, "Creating dubbed MP4.")
+                source_label = label_for_code(job.source_language_code)
+                target_label = label_for_code(job.target_language_code)
                 used_video_fallback = media.remux_video(
                     job.input_path,
                     translated_wav,
                     output_path,
-                    job.source_language_code,
-                    job.target_language_code,
+                    mp4_language_for_code(job.source_language_code),
+                    mp4_language_for_code(job.target_language_code),
                     tools,
                     mux_subtitle_path,
+                    source_track_title=f"Original - {source_label}",
+                    target_track_title=f"{target_label} - Gemini Dub",
+                    subtitle_track_title=f"{target_label} - Gemini Translation",
                 )
                 if used_video_fallback:
                     self._emit("muxing", None, "Copied video stream failed; used H.264 fallback.")

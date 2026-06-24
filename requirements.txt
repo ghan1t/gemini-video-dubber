@@ -1,0 +1,4 @@
+google-genai==2.10.0
+python-dotenv==1.2.2
+pyinstaller==6.21.0
+pyinstaller-hooks-contrib==2026.6

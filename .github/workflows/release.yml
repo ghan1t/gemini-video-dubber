@@ -1,0 +1,135 @@
+name: Build release artifacts
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runs_on: macos-13
+            artifact_name: gemini-video-dubber-macos
+          - platform: windows
+            runs_on: windows-latest
+            artifact_name: gemini-video-dubber-windows
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create virtualenv and install dependencies on macOS
+        if: matrix.platform == 'macos'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Create virtualenv and install dependencies on Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          . .\.venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Download ffmpeg tools for macOS
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p vendor/macos
+
+          curl -fL https://evermeet.cx/ffmpeg/getrelease/zip -o "$RUNNER_TEMP/ffmpeg.zip"
+          curl -fL https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip -o "$RUNNER_TEMP/ffprobe.zip"
+
+          unzip -q "$RUNNER_TEMP/ffmpeg.zip" -d "$RUNNER_TEMP/ffmpeg"
+          unzip -q "$RUNNER_TEMP/ffprobe.zip" -d "$RUNNER_TEMP/ffprobe"
+
+          cp "$(find "$RUNNER_TEMP/ffmpeg" -type f -name ffmpeg | head -n 1)" vendor/macos/ffmpeg
+          cp "$(find "$RUNNER_TEMP/ffprobe" -type f -name ffprobe | head -n 1)" vendor/macos/ffprobe
+
+          chmod +x vendor/macos/ffmpeg vendor/macos/ffprobe
+
+      - name: Download ffmpeg tools for Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vendor/windows | Out-Null
+
+          $zipPath = Join-Path $env:RUNNER_TEMP "ffmpeg-windows.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zipPath
+          Expand-Archive -LiteralPath $zipPath -DestinationPath (Join-Path $env:RUNNER_TEMP "ffmpeg-windows")
+
+          $ffmpeg = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ffmpeg-windows") -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $ffprobe = Get-ChildItem -Path (Join-Path $env:RUNNER_TEMP "ffmpeg-windows") -Recurse -Filter "ffprobe.exe" | Select-Object -First 1
+
+          if (-not $ffmpeg -or -not $ffprobe) {
+            throw "Failed to locate ffmpeg.exe and ffprobe.exe in the downloaded archive."
+          }
+
+          Copy-Item $ffmpeg.FullName "vendor/windows/ffmpeg.exe"
+          Copy-Item $ffprobe.FullName "vendor/windows/ffprobe.exe"
+
+      - name: Build macOS app
+        if: matrix.platform == 'macos'
+        run: scripts/build_macos.sh
+
+      - name: Build Windows app
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: scripts/build_windows.ps1
+
+      - name: Package macOS artifact
+        if: matrix.platform == 'macos'
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/Gemini Video Dubber.app" "Gemini-Video-Dubber-${{ github.ref_name }}-macos.zip"
+
+      - name: Package Windows artifact
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/Gemini Video Dubber.exe" -DestinationPath "Gemini-Video-Dubber-${{ github.ref_name }}-windows.zip"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: Gemini-Video-Dubber-${{ github.ref_name }}-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            release-artifacts/gemini-video-dubber-macos/*.zip
+            release-artifacts/gemini-video-dubber-windows/*.zip

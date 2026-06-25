@@ -134,13 +134,53 @@ class JobRunner:
                     result.pcm_path,
                     tools,
                 )
-                subtitle_timeline_origin = result.first_output_received_seconds - (
-                    translated_pcm_leading_silence or 0.0
+                subtitle_events_use_audio_positions = any(
+                    event.audio_position_seconds is not None for event in result.output_transcripts
+                )
+                subtitle_timeline_origin = (
+                    -(translated_pcm_leading_silence or 0.0)
+                    if subtitle_events_use_audio_positions
+                    else result.first_output_received_seconds - (translated_pcm_leading_silence or 0.0)
                 )
                 translated_wav_leading_silence = media.detect_audio_leading_silence(
                     translated_wav,
                     tools,
                 )
+                first_subtitle_event_seconds = (
+                    (
+                        result.output_transcripts[0].audio_position_seconds
+                        if subtitle_events_use_audio_positions
+                        else result.output_transcripts[0].received_at_seconds
+                    )
+                    if result.output_transcripts
+                    else None
+                )
+                subtitle_first_raw_start_seconds = (
+                    first_subtitle_event_seconds - subtitle_timeline_origin
+                    if first_subtitle_event_seconds is not None
+                    else None
+                )
+                subtitle_rebase_seconds = (
+                    max(0.0, -subtitle_first_raw_start_seconds)
+                    if subtitle_first_raw_start_seconds is not None
+                    else None
+                )
+                subtitle_timing_preview = [
+                    {
+                        "text": event.text,
+                        "received_at_seconds": event.received_at_seconds,
+                        "audio_position_seconds": event.audio_position_seconds,
+                        "raw_start_seconds": (
+                            (
+                                event.audio_position_seconds
+                                if subtitle_events_use_audio_positions
+                                else event.received_at_seconds
+                            )
+                            - subtitle_timeline_origin
+                        ),
+                    }
+                    for event in result.output_transcripts[:8]
+                ]
 
                 mux_subtitle_path = None
                 subtitle_artifact_available = False
@@ -151,7 +191,6 @@ class JobRunner:
                         subtitle_path,
                         subtitle_timeline_origin,
                         translated_duration,
-                        start_offset_seconds=job.audio_start_offset_seconds,
                     ):
                         mux_subtitle_path = subtitle_path
                         subtitle_artifact_available = True
@@ -178,7 +217,17 @@ class JobRunner:
                     "original_audio_leading_silence_seconds": original_leading_silence,
                     "translated_pcm_leading_silence_seconds": translated_pcm_leading_silence,
                     "translated_wav_leading_silence_seconds": translated_wav_leading_silence,
+                    "subtitle_uses_audio_start_offset": False,
+                    "subtitle_timing_basis": (
+                        "translated_audio_position"
+                        if subtitle_events_use_audio_positions
+                        else "wall_clock_receive_time"
+                    ),
                     "subtitle_timeline_origin_seconds": subtitle_timeline_origin,
+                    "subtitle_first_event_timeline_seconds": first_subtitle_event_seconds,
+                    "subtitle_first_raw_start_seconds": subtitle_first_raw_start_seconds,
+                    "subtitle_rebase_seconds": subtitle_rebase_seconds,
+                    "subtitle_timing_preview": subtitle_timing_preview,
                     "source_language_warning": result.detected_source_mismatch,
                     "input_transcript_count": len(result.input_transcripts),
                     "output_transcript_count": len(result.output_transcripts),

@@ -143,6 +143,17 @@ async def translate_audio_stream(
                 if not server_content:
                     continue
                 received_at = time.monotonic()
+                model_turn = getattr(server_content, "model_turn", None)
+                response_audio_chunks: list[bytes] = []
+                for part in getattr(model_turn, "parts", []) or []:
+                    inline_data = getattr(part, "inline_data", None)
+                    data = getattr(inline_data, "data", None)
+                    if data:
+                        response_audio_chunks.append(_audio_payload_bytes(data))
+                response_audio_bytes = sum(len(chunk) for chunk in response_audio_chunks)
+                response_audio_seconds = (output_bytes + response_audio_bytes) / (
+                    media.PCM_OUTPUT_RATE * media.PCM_SAMPLE_WIDTH_BYTES
+                )
                 input_transcription = getattr(server_content, "input_transcription", None)
                 if input_transcription:
                     text = _transcript_text(input_transcription)
@@ -168,14 +179,11 @@ async def translate_audio_stream(
                                 text,
                                 received_at - started_at,
                                 _language_code(output_transcription),
+                                response_audio_seconds,
                             )
                         )
-                model_turn = getattr(server_content, "model_turn", None)
-                for part in getattr(model_turn, "parts", []) or []:
-                    inline_data = getattr(part, "inline_data", None)
-                    data = getattr(inline_data, "data", None)
-                    if data:
-                        audio_bytes = _audio_payload_bytes(data)
+                for audio_bytes in response_audio_chunks:
+                    if audio_bytes:
                         if first_output_received is None:
                             first_output_received = received_at
                         output_file.write(audio_bytes)

@@ -13,7 +13,7 @@ Gemini Live Translate accepts raw 16-bit PCM mono audio at 16 kHz and returns ra
 
 - Python 3.11+
 - `ffmpeg` and `ffprobe` on `PATH`, or bundled under `vendor/<platform>/`
-- Gemini API key in `GEMINI_API_KEY`, `.env`, or the app's one-time API key field
+- Gemini API key in `GEMINI_API_KEY`, `.env`, or the app's one-time API key field (create one here: https://aistudio.google.com/api-keys)
 
 Dependency versions were checked against current online PyPI JSON metadata on 2026-06-24 and pinned in `requirements.txt` / `requirements-dev.txt`.
 
@@ -32,6 +32,8 @@ Set `GEMINI_API_KEY` in `.env` or enter it in the GUI.
 
 ## Run
 
+Start the executable or
+
 ```bash
 python -m gemini_video_dubber
 ```
@@ -39,11 +41,14 @@ python -m gemini_video_dubber
 When running from source, the app checks `vendor/macos/ffmpeg` and `vendor/macos/ffprobe`
 before falling back to `PATH`.
 
-Use the GUI's dub start offset field to tune translated audio and subtitle timing.
+Use the GUI's dub start offset field to tune translated audio timing.
 Positive values delay the dub; negative values start it earlier by trimming translated audio.
-The job report includes the observed Gemini wall-clock latency and measured leading
-silence for the original audio, raw translated PCM, and final translated WAV. Use
-the measured silence values, not the wall-clock latency, when choosing an offset.
+Approximate subtitle timing is derived separately from Gemini output transcript events
+using translated-audio positions plus measured leading silence in the translated PCM.
+The job report includes the observed Gemini wall-clock latency for diagnostics, plus
+measured leading silence for the original audio, raw translated PCM, final translated WAV,
+and subtitle timing preview fields. Use the measured silence values and subtitle timing
+fields, not the wall-clock latency, when diagnosing sync.
 
 ## Test
 

@@ -11,7 +11,7 @@ if ffprobe.exists():
     binaries.append((str(ffprobe), "bin"))
 
 a = Analysis(
-    ["src/gemini_video_dubber/__main__.py"],
+    [str(root / "src" / "gemini_video_dubber" / "__main__.py")],
     pathex=[str(root / "src")],
     binaries=binaries,
     datas=[],

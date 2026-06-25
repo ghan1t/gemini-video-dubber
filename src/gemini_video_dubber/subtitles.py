@@ -12,6 +12,7 @@ class TranscriptEvent:
     text: str
     received_at_seconds: float
     language_code: Optional[str] = None
+    audio_position_seconds: Optional[float] = None
 
 
 @dataclass
@@ -138,16 +139,25 @@ def transcript_events_to_srt(
     timeline_events = sorted(
         (
             (
-                max(
-                    0.0,
-                    event.received_at_seconds - first_input_sent_seconds + start_offset_seconds,
-                ),
+                (
+                    event.audio_position_seconds - first_input_sent_seconds
+                    if event.audio_position_seconds is not None
+                    else event.received_at_seconds - first_input_sent_seconds
+                )
+                + start_offset_seconds,
                 event,
             )
         for event in usable
         ),
         key=lambda item: item[0],
     )
+    first_start = timeline_events[0][0]
+    if first_start < 0.0:
+        timeline_events = [
+            (start - first_start, event) for start, event in timeline_events
+        ]
+    else:
+        timeline_events = [(max(0.0, start), event) for start, event in timeline_events]
     captions: list[_Caption] = []
     for index, (start, event) in enumerate(timeline_events):
         text = _clean_text(event.text)

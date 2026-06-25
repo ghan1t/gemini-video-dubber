@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -82,7 +83,7 @@ def test_job_persists_translated_audio_and_subtitles(
             first_input_sent_seconds=0.0,
             first_output_received_seconds=0.25,
             output_audio_duration=0.1,
-            output_transcripts=[TranscriptEvent("Hola", 0.25, "es")],
+            output_transcripts=[TranscriptEvent("Hola", 0.25, "es", audio_position_seconds=0.25)],
         )
 
     def fake_remux_video(*args, **kwargs):
@@ -122,4 +123,21 @@ def test_job_persists_translated_audio_and_subtitles(
     assert stem.with_name(f"{stem.name}_translated_24k_mono.pcm").exists()
     assert stem.with_name(f"{stem.name}_translated_24k_mono.wav").exists()
     assert stem.with_name(f"{stem.name}_translated_subtitles.srt").exists()
-    assert output_path.with_suffix(".job_report.json").exists()
+    report_path = output_path.with_suffix(".job_report.json")
+    assert report_path.exists()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["audio_start_offset_seconds"] == 0.0
+    assert report["subtitle_uses_audio_start_offset"] is False
+    assert report["subtitle_timing_basis"] == "translated_audio_position"
+    assert report["subtitle_timeline_origin_seconds"] == -0.1
+    assert report["subtitle_first_event_timeline_seconds"] == 0.25
+    assert report["subtitle_first_raw_start_seconds"] == 0.35
+    assert report["subtitle_rebase_seconds"] == 0.0
+    assert report["subtitle_timing_preview"] == [
+        {
+            "text": "Hola",
+            "received_at_seconds": 0.25,
+            "audio_position_seconds": 0.25,
+            "raw_start_seconds": 0.35,
+        }
+    ]

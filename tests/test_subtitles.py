@@ -39,6 +39,34 @@ def test_start_offset_shifts_captions_earlier() -> None:
     assert "00:00:00,200 --> 00:00:03,200" in content
 
 
+def test_negative_first_caption_rebases_following_captions() -> None:
+    content = transcript_events_to_srt(
+        [
+            TranscriptEvent("First", 0.0, "lv"),
+            TranscriptEvent("Second", 2.0, "lv"),
+        ],
+        first_input_sent_seconds=1.0,
+        translated_audio_duration=5.0,
+    )
+
+    assert "00:00:00,000 --> 00:00:02,000" in content
+    assert "00:00:02,000 --> 00:00:05,000" in content
+
+
+def test_audio_position_timing_is_preferred_for_subtitles() -> None:
+    content = transcript_events_to_srt(
+        [
+            TranscriptEvent("First", 4.0, "lv", audio_position_seconds=0.4),
+            TranscriptEvent("Second", 4.5, "lv", audio_position_seconds=2.0),
+        ],
+        first_input_sent_seconds=0.1,
+        translated_audio_duration=5.0,
+    )
+
+    assert "00:00:00,300 --> 00:00:01,900" in content
+    assert "00:00:01,900 --> 00:00:04,900" in content
+
+
 def test_sparse_transcripts_do_not_create_long_caption() -> None:
     content = transcript_events_to_srt(
         [

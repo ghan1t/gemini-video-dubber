@@ -35,7 +35,8 @@ The integration test requires `GEMINI_API_KEY` in `.env` or the environment.
     - `src/gemini_video_dubber/jobs.py`
     - Main pipeline lives in `JobRunner._run`.
     - Controls validation, ffprobe, Gemini call, WAV writing, subtitle writing, artifact copying, MP4 remux, report JSON.
-    - `DubJob.audio_start_offset_seconds` is the signed timing adjustment.
+    - `DubJob.audio_start_offset_seconds` is the signed translated-audio timing adjustment.
+    - Subtitle timing diagnostics are also summarized into the job report, including timing basis and a preview of the first subtitle events.
 
 - Gemini Live Translate:
     - `src/gemini_video_dubber/gemini_live_translate.py`
@@ -43,6 +44,7 @@ The integration test requires `GEMINI_API_KEY` in `.env` or the environment.
     - Sends 100 ms PCM chunks.
     - Uses `audio_stream_end=True`.
     - Receives raw/base64 audio chunks and transcript events.
+    - Output transcript events now carry translated-audio positions when available.
     - Websocket ping timeout is set through `types.HttpOptions(async_client_args={"ping_timeout": 120})`.
 
 - Media / ffmpeg:
@@ -62,6 +64,7 @@ The integration test requires `GEMINI_API_KEY` in `.env` or the environment.
 - Subtitles:
     - `src/gemini_video_dubber/subtitles.py`
     - Converts Gemini output transcript events to SRT.
+    - Prefers translated-audio positions over wall-clock receipt time when timing subtitle events.
     - Groups fragments into readable captions by punctuation, gap, duration, and character limit.
     - Wraps captions to two readable lines.
     - Prevents overlapping subtitle times.
@@ -104,7 +107,13 @@ tests/output/Old_Spice-Lecture_dubbed_YYYYMMDD_HHMMSS_translated_subtitles.srt
     - `translated_pcm_leading_silence_seconds`
     - `translated_wav_leading_silence_seconds`
     - `subtitle_timeline_origin_seconds`
-- The GUI offset is for fine tuning after the corrected baseline. Default should usually be `0.0`.
+    - `subtitle_timing_basis`
+    - `subtitle_first_event_timeline_seconds`
+    - `subtitle_first_raw_start_seconds`
+    - `subtitle_rebase_seconds`
+    - `subtitle_timing_preview`
+- Subtitle timing should be diagnosed from translated-audio position plus measured translated PCM leading silence, not from wall-clock receipt timestamps.
+- The GUI offset is for fine tuning dubbed audio after the corrected baseline. Default should usually be `0.0`.
 
 **Tests**
 

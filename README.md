@@ -13,7 +13,7 @@ Gemini Live Translate accepts raw 16-bit PCM mono audio at 16 kHz and returns ra
 
 - Python 3.11+
 - `ffmpeg` and `ffprobe` on `PATH`, or bundled under `vendor/<platform>/`
-- Gemini API key in `GEMINI_API_KEY`, `.env`, or the app's one-time API key field
+- Gemini API key in `GEMINI_API_KEY`, `.env`, or the app's one-time API key field (create one here: https://aistudio.google.com/api-keys)
 
 Dependency versions were checked against current online PyPI JSON metadata on 2026-06-24 and pinned in `requirements.txt` / `requirements-dev.txt`.
 
@@ -31,6 +31,8 @@ cp .env.example .env
 Set `GEMINI_API_KEY` in `.env` or enter it in the GUI.
 
 ## Run
+
+Start the executable or
 
 ```bash
 python -m gemini_video_dubber
